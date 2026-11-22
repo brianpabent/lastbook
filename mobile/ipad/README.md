@@ -105,6 +105,17 @@ bash tools/build_mediumalltest.sh && build/mediumalltest
 
 This plans and checks Small, Medium and All installs against tiny fixtures; the current result is 32 pass. `tools/build_installtest.sh` builds `build/installtest`, which runs single plan, install and download steps.
 
+**PR address lookup on an iPad simulator.** Boot an iPad in Simulator, then run from `mobile/ipad`:
+
+```bash
+LB_SIM=<booted-iPad-UDID> python3 tools/test_pr_places_simulator.py
+```
+
+Find the UDID with `xcrun simctl list devices booted`. The test builds the existing route driver for the iOS Simulator
+and runs the native place-search route against invented road, street and parcel indexes. It checks Texas exact-address
+precedence and first-page fallback, plus Puerto Rico parcel pages of 20, 4 and 0. It needs no app install, real address
+pack, model or dataset download; it does not exercise map UI gestures.
+
 **Parity with the desktop engine.**
 1. Put a test copy of a `LastbookData` folder at `build/LastbookData`.
 2. Build the tool: `bash tools/build_apidump.sh`.
