@@ -8,17 +8,17 @@ permissions:
 jobs:
   ipad-regression:
     runs-on: xcode-27
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: efc4ea6e2809c7ec4582180d90d8a1339799653c
+          ref: e17d9e9c669dca71162aea7ad97b7f9b1fb78024
           persist-credentials: false
       - name: Boot an iPad simulator
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "efc4ea6e2809c7ec4582180d90d8a1339799653c"
+          test "$(git rev-parse HEAD)" = "e17d9e9c669dca71162aea7ad97b7f9b1fb78024"
           test "$(git hash-object mobile/ipad/Lastbook/API/MapAPI.swift)" = "30790bb0534ec44e808ecb832d324fbf5e11923b"
           xcodebuild -version
           xcrun simctl list runtimes
