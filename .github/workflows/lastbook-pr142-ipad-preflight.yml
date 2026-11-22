@@ -1,4 +1,4 @@
-name: Lastbook PR 142 iPad simulator preflight
+name: Lastbook PR 142 iPad simulator fixture
 on:
   push:
     branches: [loom/pr142-ipad-simulator]
@@ -13,8 +13,20 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: f81cb1bc6d3b861f5c8773117f22437620ad4589
+          path: product
+          persist-credentials: false
+      - name: Check out the scratch-only probe
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: scratch-tools
+          sparse-checkout: |
+            .github/lastbook-pr142-simulator-probe.py
+            .github/lastbook-pr142-native-precedence.patch
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Verify checkout and start an available iPad simulator
+        working-directory: product
         shell: bash
         run: |
           set -euo pipefail
@@ -30,9 +42,13 @@ jobs:
           echo "IPAD_UDID=$ipad" >> "$GITHUB_ENV"
           xcrun simctl boot "$ipad"
           xcrun simctl bootstatus "$ipad" -b
-      - name: Build exact Lastbook revision for iPad simulator
+      - name: Inject scratch-only DEBUG simulator probe
         shell: bash
-        working-directory: mobile/ipad
+        working-directory: product
+        run: PYTHONPATH="$PWD" python3 ../scratch-tools/.github/lastbook-pr142-simulator-probe.py --instrument
+      - name: Build exact Lastbook baseline plus the isolated simulator probe
+        shell: bash
+        working-directory: product/mobile/ipad
         run: |
           set -euo pipefail
           bash scripts/prepare_dependencies.sh
@@ -42,4 +58,38 @@ jobs:
           xcrun simctl bootstatus "$IPAD_UDID" -b
           xcrun simctl install "$IPAD_UDID" "$RUNNER_TEMP/lastbook-dd/Build/Products/Debug-iphonesimulator/Lastbook.app"
           xcrun simctl get_app_container "$IPAD_UDID" local.lastbook.ipad data
-          printf '%s\n' 'Simulator boot, build and app install completed. No fixture assertions in this preflight.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Record baseline invented TX precedence and PR paging
+        id: baseline
+        continue-on-error: true
+        shell: bash
+        working-directory: product
+        run: |
+          echo "## Original PR head f81cb1b" >> "$GITHUB_STEP_SUMMARY"
+          PYTHONPATH="$PWD" python3 ../scratch-tools/.github/lastbook-pr142-simulator-probe.py "$IPAD_UDID"
+      - name: Apply and verify candidate MapAPI product blob
+        shell: bash
+        working-directory: product
+        run: |
+          set -euo pipefail
+          git apply --check "../scratch-tools/.github/lastbook-pr142-native-precedence.patch"
+          git apply "../scratch-tools/.github/lastbook-pr142-native-precedence.patch"
+          test "$(git hash-object mobile/ipad/Lastbook/API/MapAPI.swift)" = "30790bb0534ec44e808ecb832d324fbf5e11923b"
+          git diff --check
+          git diff --name-only
+      - name: Rebuild and install the candidate on the same iPad
+        shell: bash
+        working-directory: product/mobile/ipad
+        run: |
+          set -euo pipefail
+          xcrun simctl terminate "$IPAD_UDID" local.lastbook.ipad || true
+          log="$RUNNER_TEMP/lastbook-candidate-build.log"
+          xcodebuild -project Lastbook.xcodeproj -scheme Lastbook -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/lastbook-dd" CODE_SIGNING_ALLOWED=NO build > "$log" 2>&1 || { tail -100 "$log"; exit 1; }
+          tail -5 "$log"
+          xcrun simctl bootstatus "$IPAD_UDID" -b
+          xcrun simctl install "$IPAD_UDID" "$RUNNER_TEMP/lastbook-dd/Build/Products/Debug-iphonesimulator/Lastbook.app"
+      - name: Assert the same invented cases against the candidate
+        shell: bash
+        working-directory: product
+        run: |
+          echo "## Native precedence candidate, MapAPI blob 30790bb" >> "$GITHUB_STEP_SUMMARY"
+          PYTHONPATH="$PWD" python3 ../scratch-tools/.github/lastbook-pr142-simulator-probe.py "$IPAD_UDID"
