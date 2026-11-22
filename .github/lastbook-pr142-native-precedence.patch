@@ -1,0 +1,101 @@
+--- a/mobile/ipad/Lastbook/API/MapAPI.swift
++++ b/mobile/ipad/Lastbook/API/MapAPI.swift
+@@ -1437,11 +1437,11 @@
+ 
+     static func isAddressQuery(_ q: String) -> Bool { q.firstMatch(#"^\s*\d[\w-]*\s+\S"#) != nil || prParts(q) != nil || PuertoRicoParcels.number(q) != nil || PuertoRicoRoads.looksRural(q) || PuertoRicoRoads.parcelDirection(q) }
+ 
+-    static func streetForms(_ street: String) -> [String] {
++    static func streetForms(_ street: String, inferDirection: Bool = true) -> [String] {
+         let words = street.split(separator: " ").map(String.init)
+         var forms = [street, words.map { TO_DIGITS[$0] ?? $0 }.joined(separator: " "), words.map { TO_WORDS[$0] ?? $0 }.joined(separator: " ")]
+         forms += forms.map { $0.replacing(#"\b(\d+)(st|nd|rd|th)\b"#, with: "$1") }
+-        if !["n", "s", "e", "w", "ne", "nw", "se", "sw"].contains(words.first ?? "") {
++        if inferDirection && !["n", "s", "e", "w", "ne", "nw", "se", "sw"].contains(words.first ?? "") {
+             forms += forms.flatMap { f in ["n", "s", "e", "w"].map { "\($0) \(f)" } }
+         }
+         var seen = Set<String>()
+@@ -1466,27 +1466,47 @@
+     }
+ 
+     static func find(_ query: String, limit: Int = 8, near: (Double, Double)?, parcelOffset: Int = 0, parcelLimit: Int = 8) -> [[String: Any]] {
++        guard limit > 0 else { return [] }
+         let key = PuertoRicoParcels.number(query), rural = PuertoRicoRoads.parse(query, parcel: true)
+-        if key != nil || rural != nil || PuertoRicoRoads.looksRural(query) || PuertoRicoRoads.parcelDirection(query) {
+-            guard limit > 0, let db = Library.shared.db("addresses/PR.sqlite", geo: true) else { return [] }
++        let ruralish = key != nil || rural != nil || PuertoRicoRoads.looksRural(query) || PuertoRicoRoads.parcelDirection(query)
++        if ruralish, let db = Library.shared.db("addresses/PR.sqlite", geo: true) {
+             let parcels = db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_parcel'") != nil
+-            if let key { return parcels && parcelOffset == 0 ? PuertoRicoParcels.byNumber(db,key) : [] }
+             let roads = db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_road'") != nil
+-            guard parcels || roads else { return [] }
+-            let wording = parcels ? PuertoRicoPermits.matches(query,db) : [:]
+-            func lookup(_ a: PuertoRicoRoads.Address?) -> [Rec] {
+-                let candidates = parcels ? PuertoRicoParcels.find(a,db,limit: parcelLimit,offset: parcelOffset,wording:wording) : []
+-                return candidates + (roads && parcelOffset == 0 ? a.map { PuertoRicoRoads.find($0,db,limit) } ?? [] : [])
+-            }
+-            let rows = lookup(rural)
+-            if !rows.isEmpty { return rows }
+-            guard let a = PuertoRicoModel.interpret(query, rural) else { return [] }
+-            return lookup(a).map { row in
+-                var result = row
+-                result["interpreted"] = PuertoRicoModel.description(a)
+-                return result
++            if let key {
++                if parcels && parcelOffset == 0 {
++                    let rows = PuertoRicoParcels.byNumber(db, key)
++                    if !rows.isEmpty { return rows }
++                }
++            } else if parcels || roads {
++                let wording = parcels ? PuertoRicoPermits.matches(query, db) : [:]
++                func lookup(_ a: PuertoRicoRoads.Address?) -> [Rec] {
++                    let candidates = parcels ? PuertoRicoParcels.find(a, db, limit: parcelLimit, offset: parcelOffset, wording: wording) : []
++                    return candidates + (roads && parcelOffset == 0 ? a.map { PuertoRicoRoads.find($0, db, limit) } ?? [] : [])
++                }
++                func preferExactStreet(_ rows: [Rec]) -> [Rec] {
++                    guard parcelOffset == 0,
++                          rows.contains(where: { $0["kind"] as? String == "Road kilometer" }),
++                          !rows.contains(where: { $0["parcelNumber"] != nil }) else { return rows }
++                    let exact = findStreet(query, limit: limit, near: near, exactOnly: true)
++                    return exact.isEmpty ? rows : Array((exact + rows.filter { $0["kind"] as? String != "Road kilometer" }).prefix(limit))
++                }
++                let rows = lookup(rural)
++                if !rows.isEmpty { return preferExactStreet(rows) }
++                if let a = PuertoRicoModel.interpret(query, rural) {
++                    let interpreted = lookup(a).map { row in
++                        var result = row
++                        result["interpreted"] = PuertoRicoModel.description(a)
++                        return result
++                    }
++                    if !interpreted.isEmpty { return preferExactStreet(interpreted) }
++                }
+             }
+         }
++        guard parcelOffset == 0 else { return [] }
++        return findStreet(query, limit: limit, near: near)
++    }
++
++    private static func findStreet(_ query: String, limit: Int, near: (Double, Double)?, exactOnly: Bool = false) -> [Rec] {
+         let legacyNumber = query.firstMatch(#"^\s*\d[\w-]*\s+\S"#) != nil, pr = prParts(query)
+         guard limit > 0, legacyNumber || pr != nil, let geo = Library.shared.geo else { return [] }
+         let (number, words, state, postcode) = legacyNumber ? parts(query) : ("", [String](), "", "")
+@@ -1511,12 +1531,16 @@
+             let street = streetWords.joined(separator: " ")
+             let city = words[count...].joined(separator: " ")
+             var rows: [SQLiteDB.Row] = []
+-            for form in streetForms(street) {
+-                var conds = ["num IN (?, ?)", "norm >= ?", "norm < ?"]
+-                var params: [Any?] = [number, number.lowercased(), form, form + "\u{FFFF}"]
++            for form in streetForms(street, inferDirection: !exactOnly) {
++                var conds = exactOnly ? ["num IN (?, ?)", "norm = ?"] : ["num IN (?, ?)", "norm >= ?", "norm < ?"]
++                var params: [Any?] = [number, number.lowercased(), form]
++                if !exactOnly { params.append(form + "\u{FFFF}") }
+                 if !state.isEmpty { conds.append("state = ?"); params.append(state) }
+                 if !postcode.isEmpty { conds.append("zip = ?"); params.append(postcode) }
+-                if !city.isEmpty { conds.append("lower(city) LIKE ?"); params.append(city + "%") }
++                if !city.isEmpty {
++                    conds.append(exactOnly ? "lower(city) = ?" : "lower(city) LIKE ?")
++                    params.append(exactOnly ? city : city + "%")
++                }
+                 let sql = "SELECT num,street,city,state,zip,lat,lon,norm FROM addr WHERE " + conds.joined(separator: " AND ") + " ORDER BY length(norm),norm LIMIT ?"
+                 for db in dbs { rows += db.query(sql, params + [limit * 3]) }
+             }
