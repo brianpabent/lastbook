@@ -108,7 +108,7 @@ This plans and checks Small, Medium and All installs against tiny fixtures; the 
 **PR address lookup on an iPad simulator.** Boot an iPad in Simulator, then run from `mobile/ipad`:
 
 ```bash
-LB_SIM=<booted-iPad-UDID> python3 tools/test_pr_places_simulator.py
+LB_SIM=YOUR_IPAD_UDID python3 tools/test_pr_places_simulator.py
 ```
 
 Find the UDID with `xcrun simctl list devices booted`. The test builds the existing route driver for the iOS Simulator
