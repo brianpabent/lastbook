@@ -1,0 +1,32 @@
+name: Lastbook PR 142 permanent simulator regression
+on:
+  push:
+    branches: [loom/pr142-ipad-regression]
+    paths: [.github/workflows/lastbook-pr142-rerunnable-test.yml]
+permissions:
+  contents: read
+jobs:
+  ipad-regression:
+    runs-on: xcode-27
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: efc4ea6e2809c7ec4582180d90d8a1339799653c
+          persist-credentials: false
+      - name: Boot an iPad simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "efc4ea6e2809c7ec4582180d90d8a1339799653c"
+          test "$(git hash-object mobile/ipad/Lastbook/API/MapAPI.swift)" = "30790bb0534ec44e808ecb832d324fbf5e11923b"
+          xcodebuild -version
+          xcrun simctl list runtimes
+          ipad=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; groups=json.load(sys.stdin)["devices"]; matches=[(key,d) for key,ds in groups.items() if ".iOS-27-" in key for d in ds if d["isAvailable"] and d["name"].startswith("iPad")]; assert matches, "No iPad on iOS 27 Simulator"; print(sorted(matches, key=lambda p: (p[0],p[1]["name"]))[-1][1]["udid"])')
+          echo "LB_SIM=$ipad" >> "$GITHUB_ENV"
+          xcrun simctl boot "$ipad"
+          xcrun simctl bootstatus "$ipad" -b
+      - name: Run the documented synthetic iPad regression test
+        shell: bash
+        working-directory: mobile/ipad
+        run: python3 tools/test_pr_places_simulator.py
