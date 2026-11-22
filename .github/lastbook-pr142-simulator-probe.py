@@ -66,11 +66,12 @@ def fixture(test_file, test_class, target):
     (target / "library-data").mkdir(parents=True)
     (target / "library-data/catalog.json").write_text("[]\n")
 
-def tx(target, exact):
+def tx(target, exact, prefix=True):
     db = sqlite3.connect(target / "derived/geo/addresses/TX.sqlite")
     try:
         db.execute("CREATE TABLE addr(num,street,norm,city,state,zip,lat,lon)")
-        db.execute("INSERT INTO addr VALUES('19','KM4HM4 Boulevard Extension','km4hm4 blvd extension','Las Penas','TX','75000',7,8)")
+        if prefix:
+            db.execute("INSERT INTO addr VALUES('19','KM4HM4 Boulevard Extension','km4hm4 blvd extension','Las Penas','TX','75000',7,8)")
         if exact:
             db.execute("INSERT INTO addr VALUES('19','KM4HM4 Boulevard','km4hm4 blvd','Las Penas','TX','75000',5,6)")
         db.commit()
@@ -112,7 +113,7 @@ def run(udid):
         fixture("test_pr_parcels.py", "ParcelSearch", parcels)
         tx(prefix, False)
         tx(exact, True)
-        tx(parcels, True)
+        tx(parcels, True, prefix=False)
         shutil.copytree(parcels, empty)
         db = sqlite3.connect(empty / "derived/geo/addresses/PR.sqlite")
         try:
