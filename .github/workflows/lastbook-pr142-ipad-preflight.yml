@@ -2,7 +2,7 @@ name: Lastbook PR 142 iPad simulator fixture
 on:
   push:
     branches: [loom/pr142-ipad-simulator]
-    paths: [.github/workflows/lastbook-pr142-ipad-preflight.yml]
+    paths: [.github/workflows/lastbook-pr142-ipad-preflight.yml, .github/lastbook-pr142-simulator-probe.py]
 permissions:
   contents: read
 jobs:
